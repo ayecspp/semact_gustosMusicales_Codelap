@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TensorFlow.js Tutorial</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.0.2/dist/tfjs-vis.umd.min.js"></script>
+  <body>
+    <div class="container">
+      <h1>Predicción MPG con TensorFlow.js</h1>
+      <div id="status">Inicializando...</div>
+    </div>
+
+    <script>
+      const statusElement = document.getElementById("status");
+
+      async function loadData() {
+        const carsDataResponse = await fetch(
+          "https://storage.googleapis.com/tfjs-tutorials/carsData.json"
+        );
+        const carsDataJSON = await carsDataResponse.json();
+        return carsDataJSON
+          .map((car) => ({
+            mpg: car.Miles_per_Gallon,
+            hp: car.Horsepower,
+          }))
+          .filter((car) => car.mpg != null && car.hp != null);
+      }
+
+      function defineModel() {
+        const model = tf.sequential();
+        model.add(
+          tf.layers.dense({ inputShape: [1], units: 1, useBias: true })
+        );
+        model.add(tf.layers.dense({ units: 1, useBias: true }));
+        return model;
+      }
+
+      function prepTensors(data) {
+        return tf.tidy(() => {
+          tf.util.shuffle(data);
+          const inputs = data.map((d) => d.hp);
+          const labels = data.map((d) => d.mpg);
+
+          const inputTensor = tf.tensor2d(inputs, [inputs.length, 1]);
+          const labelTensor = tf.tensor2d(labels, [labels.length, 1]);
+
+          const inputMax = inputTensor.max();
+          const inputMin = inputTensor.min();
+          const labelMax = labelTensor.max();
+          const labelMin = labelTensor.min();
+
+          const normalizedInputs = inputTensor
+            .sub(inputMin)
+            .div(inputMax.sub(inputMin));
+          const normalizedLabels = labelTensor
+            .sub(labelMin)
+            .div(labelMax.sub(labelMin));
+          return {
+            inputs: normalizedInputs,
+            labels: normalizedLabels,
+            inputMax,
+            inputMin,
+            labelMax,
+            labelMin,
+          };
+        });
+      }
+
+      async function train(model, inputs, labels, epochs = 50) {
+        model.compile({
+          optimizer: tf.train.adam(),
+          loss: tf.losses.meanSquaredError,
+          metrics: ["mse"],
+        });
+        statusElement.textContent = `Entrenando modelo (epochs: ${epochs})...`;
+        return await model.fit(inputs, labels, {
+          batchSize: 32,
+          epochs,
+          shuffle: true,
+          callbacks: tfvis.show.fitCallbacks(
+            { name: "Progreso Entrenamiento" },
+            ["loss", "mse"],
+            { height: 200, callbacks: ["onEpochEnd"] }
+          ),
+        });
+      }
+
+      function plotPreds(model, originalData, normalizationMetadata) {
+        const { inputMax, inputMin, labelMin, labelMax } =
+          normalizationMetadata;
+        const [xValues, predictions] = tf.tidy(() => {
+          const normalizedXValues = tf.linspace(0, 1, 100);
+          const normalizedPredictions = model.predict(
+            normalizedXValues.reshape([100, 1])
+          );
+          const unnormalizedXValues = normalizedXValues
+            .mul(inputMax.sub(inputMin))
+            .add(inputMin);
+          const unnormalizedPredictions = normalizedPredictions
+            .mul(labelMax.sub(labelMin))
+            .add(labelMin);
+          return [
+            unnormalizedXValues.dataSync(),
+            unnormalizedPredictions.dataSync(),
+          ];
+        });
+
+        const predictionPoints = Array.from(xValues).map((val, i) => ({
+          x: val,
+          y: predictions[i],
+        }));
+        const originalPoints = originalData.map((d) => ({
+          x: d.hp,
+          y: d.mpg,
+        }));
+
+        tfvis.render.scatterplot(
+          { name: "Predicciones vs Originales" },
+          {
+            values: [originalPoints, predictionPoints],
+            series: ["original", "predicción"],
+          },
+          { xLabel: "Horsepower", yLabel: "MPG", height: 300 }
+        );
+      }
+
+      async function main() {
+        statusElement.textContent = "Cargando datos...";
+        const data = await loadData();
+        const dataPoints = data.map((d) => ({ x: d.hp, y: d.mpg }));
+        tfvis.render.scatterplot(
+          { name: "HP vs MPG (Datos)" },
+          { values: dataPoints },
+          { xLabel: "Horsepower", yLabel: "MPG", height: 300 }
+        );
+        statusElement.textContent = "Datos cargados. Definiendo modelo...";
+
+        const model = defineModel();
+        tfvis.show.modelSummary({ name: "Arquitectura Modelo" }, model);
+        statusElement.textContent = "Modelo definido. Preparando tensores...";
+
+        const tensorData = prepTensors(data);
+        statusElement.textContent =
+          "Tensores listos. Iniciando entrenamiento...";
+
+        const trainingEpochs = 100;
+        await train(
+          model,
+          tensorData.inputs,
+          tensorData.labels,
+          trainingEpochs
+        );
+        statusElement.textContent =
+          "Entrenamiento finalizado. Graficando predicciones...";
+
+        plotPreds(model, data, tensorData);
+        statusElement.textContent = "Proceso completo.";
+      }
+
+      document.addEventListener("DOMContentLoaded", main);
+    </script>
+  </body>
+</html>
