@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Recomendación Musical</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.0.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    .rating-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+    }
+    .rating-table td, .rating-table th {
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+    }
+    .rating-input {
+      width: 50px;
+    }
+    button {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 20px 0;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #results {
+      display: none;
+      margin-top: 20px;
+    }
+    .result-item {
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>¿Qué música te gusta?</h1>
+  
+  <div id="rating-container">
+    <p>Califica cada banda del 1 al 10 según tu preferencia:</p>
+    
+    <table class="rating-table">
+      <thead>
+        <tr>
+          <th>Banda</th>
+          <th>Calificación (1-10)</th>
+        </tr>
+      </thead>
+      <tbody id="bands-container">
+        <!-- Las bandas se insertarán dinámicamente aquí -->
+      </tbody>
+    </table>
+    
+    <button id="process-button">Procesar Información</button>
+  </div>
+  
+  <div id="results">
+    <h2>Tus estilos musicales favoritos</h2>
+    <ol id="genres-container">
+    </ol>
+    <button id="reset-button">Volver a Calificar</button>
+  </div>
+
+  <script>
+    // Datos del modelo
+    const bands = [
+      'Nirvana',
+      'Nine Inch Nails',
+      'Backstreet Boys',
+      'N Sync',
+      'Night Club',
+      'Apashe',
+      'Stone Temple Pilots'
+    ];
+    
+    const features = [
+      'Grunge',
+      'Rock',
+      'Industrial',
+      'Boy Band',
+      'Dance',
+      'Techno'
+    ];
+    
+    const band_features = [
+      [1, 1, 0, 0, 0, 0], // Nirvana: Grunge, Rock
+      [1, 0, 1, 0, 0, 0], // Nine Inch Nails: Grunge, Industrial
+      [0, 0, 0, 1, 1, 0], // Backstreet Boys: Boy Band, Dance
+      [0, 0, 0, 1, 0, 0], // N Sync: Boy Band
+      [0, 0, 1, 0, 0, 1], // Night Club: Industrial, Techno
+      [0, 0, 1, 0, 0, 1], // Apashe: Industrial, Techno
+      [1, 1, 0, 0, 0, 0]  // Stone Temple Pilots: Grunge, Rock
+    ];
+    
+    // Crear los campos de entrada para cada banda
+    const bandsContainer = document.getElementById('bands-container');
+    
+    bands.forEach((band, index) => {
+      const row = document.createElement('tr');
+      
+      const nameCell = document.createElement('td');
+      nameCell.textContent = band;
+      
+      const ratingCell = document.createElement('td');
+      
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '1';
+      input.max = '10';
+      input.value = '5'; // Valor predeterminado
+      input.id = `band-${index}`;
+      input.className = 'rating-input';
+      
+      ratingCell.appendChild(input);
+      row.appendChild(nameCell);
+      row.appendChild(ratingCell);
+      
+      bandsContainer.appendChild(row);
+    });
+    
+    // Procesar las calificaciones del usuario cuando haga clic en el botón
+    const processButton = document.getElementById('process-button');
+    const resultsDiv = document.getElementById('results');
+    const genresContainer = document.getElementById('genres-container');
+    const resetButton = document.getElementById('reset-button');
+    
+    processButton.addEventListener('click', () => {
+      tf.tidy(() => {
+        // Obtener las calificaciones del usuario
+        const userRatings = bands.map((_, index) => {
+          const value = parseInt(document.getElementById(`band-${index}`).value);
+          // Asegurarse de que la calificación está entre 1 y 10
+          return Math.min(Math.max(value, 1), 10);
+        });
+        
+        // Convertir las calificaciones a tensor
+        const user_votes = tf.tensor2d([userRatings]);
+        
+        // Convertir las características de las bandas a tensor
+        const band_feats = tf.tensor2d(band_features);
+        
+        // Calcular los gustos del usuario
+        const user_feats = tf.matMul(user_votes, band_feats);
+        
+        // Obtener las preferencias ordenadas
+        const top_user_features = tf.topk(user_feats, features.length);
+        
+        // Convertir a JavaScript array
+        const top_genres_indices = top_user_features.indices.arraySync()[0];
+        const top_genres_values = top_user_features.values.arraySync()[0];
+        
+        // Limpiar contenedor de géneros
+        genresContainer.innerHTML = '';
+        
+        // Mostrar los géneros favoritos
+        top_genres_indices.forEach((genreIndex, rank) => {
+          const genreName = features[genreIndex];
+          const genreScore = top_genres_values[rank].toFixed(1);
+          
+          const listItem = document.createElement('li');
+          listItem.className = 'result-item';
+          listItem.textContent = `${genreName} (Puntuación: ${genreScore})`;
+          
+          genresContainer.appendChild(listItem);
+        });
+        
+        // Mostrar resultados
+        resultsDiv.style.display = 'block';
+        document.getElementById('rating-container').style.display = 'none';
+      });
+    });
+    
+    // Reiniciar para calificar de nuevo
+    resetButton.addEventListener('click', () => {
+      resultsDiv.style.display = 'none';
+      document.getElementById('rating-container').style.display = 'block';
+      
+      // Reiniciar todos los inputs a 5
+      bands.forEach((_, index) => {
+        document.getElementById(`band-${index}`).value = '5';
+      });
+    });
+  </script>
+</body>
+</html>
